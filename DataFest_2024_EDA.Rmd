@@ -1,0 +1,115 @@
+---
+title: "Datafest 2024 EDA"
+author: "Maxwell Chu"
+date: "2024-04-27"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 30), tidy = TRUE)
+```
+
+### Load and preprocess items.csv for analysis
+
+```{r}
+items <- read.csv("C:/Users/maxch/Downloads/Data/Random Sample of Data Files/items.csv", stringsAsFactors = TRUE)
+items <- select(items, page, lrn_type, lrn_template_name, chapter_number, section_number, review_flag)
+items <- items[!is.na(items["chapter_number"]), ]
+
+# make a new column combining chapter number with section (e.g. chapter 1 section 2 becomes 1.2)
+items["chapter_section"] <- as.double(unlist(items["chapter_number"])) + as.double(unlist(items["section_number"])) / 10
+
+# count the most frequently occurring types of items and filter for only the most common ones
+table(items["lrn_type"])
+frequent_items <- filter(items, lrn_type == "association" | lrn_type == "choicematrix" | lrn_type == "plaintext" | lrn_type == 
+                           "shorttext" | lrn_type == "mcq")
+head(frequent_items)
+```
+
+### Load and preprocess media_views.csv for analysis
+
+```{r}
+media_views <- read.csv("C:/Users/maxch/Downloads/Data/Random Sample of Data Files/media_views.csv")
+media_views <- select(media_views, book, release, chapter_number, section_number, media_id, access_count, proportion_video,
+                      proportion_time, review_flag)
+cat("Number of observations before omitting NA's:", nrow(media_views))
+media_views <- na.omit(media_views)
+cat("\nNumber of observations after omitting NA's:", nrow(media_views))
+head(media_views)
+```
+
+```{r}
+# Create summary statistics for proportion_video per video, along with the number of total accesses
+tapply(as.numeric(unlist(media_views["proportion_video"])), (as.character(unlist((media_views["media_id"])))), 
+       function(x){c(unlist(summary(x)), "Num_Accesses" = length(x))})
+(sapply(media_views["proportion_video"], summary))
+```
+
+Notes:
+379060892 4.2 video length: 3:10
+379319375 4.2 video length: 2:09
+379150092 5.9 video length: 4:50
+379319558 5.9 video length: 4:29
+381974697 5.4 video length: 9:02
+
+There was not enough data to do any robust data analysis for media_views.csv, as there were only five videos in the data set. One could infer that the video with ID 381974697 was skipped over almost completely by the most students compared to the other four videos because it was by far the longest, at 9 minutes and 2 seconds long. But this is still only one data point.
+
+### Load and preprocess page_views.csv and responses.csv
+
+```{r}
+page_views_2 <- read.csv("C:/Users/maxch/Downloads/Data/Random Sample of Data Files/page_views.csv")
+page_views <- page_views_2
+page_views <- page_views[!is.na(page_views["chapter_number"]), ]
+
+# combine chapter and section numbers as done previously
+page_views["chapter_section"] <- as.double(unlist(page_views["chapter_number"])) + as.double(unlist(page_views["section_number"])) /
+  10
+head(page_views)
+```
+
+```{r}
+responses <- read.csv("C:/Users/maxch/Downloads/Data/Random Sample of Data Files/responses.csv")
+responses$chapter_section <- as.double(unlist(responses["chapter_number"])) + as.double(unlist(responses["section_number"])) / 10
+head(responses)
+```
+
+### Analysis of page_views.csv and responses.csv
+
+```{r}
+info_by_ch <- page_views %>% group_by(chapter_number) %>% summarize(mean_engaged = mean(engaged, na.rm = TRUE))
+items_by_ch <- responses %>% group_by(chapter_number) %>% summarize(num_items = length(unique(item_id)))
+items_by_ch <- items_by_ch[-(nrow(items_by_ch)), ]
+info_by_ch <- cbind(info_by_ch, items_by_ch[, 2])
+info_by_ch
+engagement_num_items_by_ch <- with(info_by_ch, summary(lm((mean_engaged) ~ (num_items))))
+engagement_num_items_by_ch
+with(info_by_ch, plot(((mean_engaged) ~ (num_items))))
+```
+
+Plotting the number of items per chapter versus the mean engagement per chapter does not yield a significant correlation, as indicated by the t-test above. However, a relationship could still be found if the data were split by section rather than by chapter. Over an entire chapter, the engagement could average out between all its sections to be fairly similar to all the other chapters, concealing any variability between them.
+
+```{r}
+info_by_section <- page_views %>% group_by(chapter_section) %>% summarize(mean_engaged = mean(engaged, na.rm = TRUE))
+items_by_section <- responses %>% group_by(chapter_section) %>% summarize(num_items = length(unique(item_id)))
+items_by_section <- items_by_section[!is.na(items_by_section[,1]), ]
+info_by_section <- cbind(info_by_section, items_by_section[,2])
+head(info_by_section)
+engagement_num_items_by_section <- with(info_by_section, summary(lm(log(mean_engaged) ~ log(num_items))))
+engagement_num_items_by_section
+with(info_by_section, plot((log(mean_engaged) ~ log(num_items))))
+```
+
+Using a log-transformation on both variables, the relationship between the number of items per section and the mean engagement per section is clearly significant according to the above t-test. This makes sense, because engagement is really a measure for the total time spent being active on the section's pages, and if there are more items in a section, then students would naturally spend more time on the section going through each item.
+
+### Loading and preprocessing checkpoints_eoc.csv (end-of-chapter checkpoints)
+
+```{r}
+cp_eoc <- read.csv("C:/Users/maxch/Downloads/Data/Random Sample of Data Files/checkpoints_eoc.csv")
+eoc_by_ch <- cp_eoc %>% group_by(chapter_number) %>% summarize(mean_eoc = mean(EOC, na.rm = TRUE))
+cbind(info_by_ch, eoc_by_ch[, 2])
+summary(lm(eoc_by_ch$mean_eoc ~ info_by_ch$num_items))
+plot((eoc_by_ch$mean_eoc ~ info_by_ch$mean_engaged))
+```
+
+
